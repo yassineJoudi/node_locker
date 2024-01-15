@@ -1,0 +1,7 @@
+services:
+  node_locker.services:
+    class: Drupal\node_locker\Service\LockerServices
+  node_locker.event_subscriber:
+    class: Drupal\node_locker\EventSubscriber\LockerEventSubscriber
+    tags:
+      - { name: event_subscriber }

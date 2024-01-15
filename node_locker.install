@@ -1,0 +1,17 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the node_locker module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function node_locker_update_80001() {
+  $field_manager = \Drupal::service('entity_field.manager');
+  $field_storage_manager = \Drupal::service('field_storage_definition.listener');
+  $definitions = $field_manager->getFieldStorageDefinitions('node')['node_locker'];
+  $definitions = $field_manager->getFieldStorageDefinitions('node')['origine'];
+  $field_storage_manager->onFieldStorageDefinitionCreate($definitions);
+}

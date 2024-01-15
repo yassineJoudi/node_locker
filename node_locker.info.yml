@@ -1,0 +1,4 @@
+name: 'node locker'
+description: 'lock node whene his activated.'
+type: module
+core_version_requirement: ^9.4 || ^10

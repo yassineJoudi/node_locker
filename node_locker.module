@@ -1,0 +1,164 @@
+<?php
+
+/**
+ * @file
+ * Enhances the node in core: config for node locker, etc.
+ */
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\node\Entity\NodeType;
+use Drupal\node\NodeInterface;
+use Drupal\node\NodeTypeInterface;
+use Drupal\node_locker\Event\LockerEvent;
+
+/**
+ * Implements hook_form_FORM_ID_alter() for \Drupal\node\NodeTypeForm.
+ *
+ * Adds node locker options to the node type form.
+ */
+function node_locker_form_node_type_form_alter(&$form, FormStateInterface $form_state) {
+  switch ($form['form_id']['#id']) {
+    case "edit-node-type-edit-form":
+      $form['node_locker'] = [
+        '#type' => 'details',
+        '#title' => t('Node locker settings'),
+        '#group' => 'additional_settings',
+      ];
+      $options = array_map(function (NodeTypeInterface $type) {
+        return $type->label();
+      }, NodeType::loadMultiple());
+      asort($options);
+      $type = $form_state->getFormObject()->getEntity();
+      $form['node_locker']['locker_options'] = [
+        '#type' => 'checkbox',
+        '#title' => t('Enable locking on this type of content'),
+        '#description' => t('content type selected be locked whene clone node.'),
+        '#default_value' => $type->getThirdPartySetting('node_locker', 'available_locker', []),
+      ];
+
+      $form['#entity_builders'][] = 'node_locker_form_node_type_form_builder';
+      break;
+  }
+}
+
+/**
+ * Entity builder for the node type form with node locker.
+ *
+ * @see node_locker_form_node_type_form_alter()
+ */
+function node_locker_form_node_type_form_builder($entity_type, NodeTypeInterface $type, &$form, FormStateInterface $form_state) {
+  $type->setThirdPartySetting('node_locker', 'available_locker', $form_state->getValue('locker_options'));
+}
+
+/**
+ * Implements hook_entity_presave().
+ */
+function node_locker_entity_presave(EntityInterface $entity) {
+  if ($entity->getEntityTypeId() == 'node') {
+    $event_dispatcher = \Drupal::service('event_dispatcher');
+    $auto_title_event = new LockerEvent($entity);
+    $event_dispatcher->dispatch($auto_title_event, LockerEvent::NODE_LOCKER);
+  }
+}
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter() for \Drupal\node\NodeForm.
+ *
+ * Adds node locker item fields to the node form.
+ *
+ * @see node_locker_node_builder()
+ */
+function node_locker_form_node_form_alter(&$form, FormStateInterface $form_state) {
+  $bundle_fields = \Drupal::service('entity_field.manager')->getFieldDefinitions('node', 'article');
+  $node = $form_state->getFormObject()->getEntity();
+  $node_type = NodeType::load($node->type->target_id);
+  $node_locker = $node_type->getThirdPartySetting('node_locker', 'available_locker');
+  if (isset($node_locker) && $node_locker && $node->node_locker->value) {
+    foreach ($bundle_fields as $key => $field) {
+      if (empty($form[$key])) {
+        continue;
+      }
+      $form[$key]['#disabled'] = TRUE;
+
+    }
+    \Drupal::messenger()->addMessage(t("This node is locked, you can't edit the content."));
+
+  }
+  $form['node_locker_details'] = [
+    '#type' => 'details',
+    '#title' => t('Node locker settings'),
+    '#access' => \Drupal::currentUser()->hasPermission('administer menu'),
+    '#group' => 'advanced',
+    '#tree' => TRUE,
+    '#weight' => -2,
+    '#attributes' => ['class' => ['menu-link-form']],
+  ];
+
+  $form['node_locker_details']['node_locker'] = [
+    '#type' => 'checkbox',
+    '#title' => t('Provide node locker.'),
+    '#default_value' => !empty($node->node_locker->value) ? $node->node_locker->value : 0,
+  ];
+
+  $form['node_locker_details']['origine'] = [
+    '#type' => 'textfield',
+    '#title' => t('Node id origine.'),
+    '#default_value' => !empty($node->origine->value) ? $node->origine->value : '',
+    '#disabled' => TRUE,
+  ];
+
+  $form['#entity_builders'][] = 'node_locker_node_builder';
+}
+
+/**
+ * Entity form builder to add the locker information to the node.
+ */
+function node_locker_node_builder($entity_type, NodeInterface $entity, &$form, FormStateInterface $form_state) {
+  $entity->node_locker = $form_state->getValue('node_locker_details')['node_locker'];
+  $entity->origine = $form_state->getValue('node_locker_details')['origine'];
+}
+
+/**
+ * Implements hook_entity_base_field_info().
+ */
+function node_locker_entity_base_field_info(EntityTypeInterface $entity_type) {
+  $fields = [];
+  if ($entity_type->id() === 'node') {
+    $fields['node_locker'] = BaseFieldDefinition::create('boolean')
+      ->setLabel(t('Provide node locker'))
+      ->setRequired(FALSE)
+      ->setDescription(t('Provide node locker.'))
+      ->setRevisionable(TRUE)
+      ->setTranslatable(TRUE)
+      ->setDisplayOptions('form', [
+        'type' => 'boolean_checkbox',
+        'settings' => [
+          'display_label' => TRUE,
+        ],
+      ])
+      ->setDisplayConfigurable('form', TRUE);
+
+    $fields['origine'] = BaseFieldDefinition::create('string')
+      ->setLabel(t('Origine Nid'))
+      ->setDescription(t('The origine id relates node.'))
+      ->setTranslatable(FALSE)
+      ->setRevisionable(FALSE)
+      ->setReadOnly(TRUE)
+      ->setSetting('max_length', 32)
+      ->setDisplayOptions('view', [
+        'label' => 'hidden',
+        'type' => 'string',
+        'weight' => -5,
+      ])
+      ->setDisplayOptions('form', [
+        'type' => 'string_textfield',
+        'weight' => -5,
+      ])
+      ->setDisplayConfigurable('form', TRUE);
+  }
+
+  return $fields;
+}
